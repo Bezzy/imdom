@@ -23,22 +23,35 @@ function create_text_element(text) {
     }
 }
 
+function commit_root() {
+    commit_work(wipRoot.child);
+    wipRoot = null;
+}
+
+function commit_work(fiber) {
+    if(!fiber) {
+        return;
+    }
+
+    const dom_parent = fiber.parent.dom;
+    dom_parent.appendChild(fiber.dom);
+    commit_work(fiber.child);
+    commit_work(fiber.sibling);
+}
+
 function render(el, container) {
-    next_unit_of_work = {
+    wipRoot = {
         dom: container,
         props: {
             children: [el]
         }
     }
+    next_unit_of_work = wipRoot;
 }
 
 function perform_unit_of_work(fiber) {
     if (!fiber.dom) {
         fiber.dom = create_dom(fiber);
-    }
-
-    if (fiber.parent) {
-        fiber.parent.dom.appendChild(fiber.dom);
     }
 
     const els = fiber.props.children;
@@ -82,14 +95,22 @@ function perform_unit_of_work(fiber) {
 }
 
 let next_unit_of_work = null;
+let wipRoot = null;
+
 function workloop(deadline) {
     let should_yield = false;
     while (next_unit_of_work && !should_yield) {
         next_unit_of_work = perform_unit_of_work(next_unit_of_work);
         should_yield = deadline.timeRemaining() < 1;
     }
+
+    if (!next_unit_of_work && wipRoot) {
+        commit_root();
+    }
     requestIdleCallback(workloop);
 }
+
+requestIdleCallback(workloop);
 
 function create_dom(fiber) {
     const dom = fiber.type === "TEXT_ELEMENT" ?
@@ -105,7 +126,6 @@ function create_dom(fiber) {
     return dom;
 }
 
-requestIdleCallback(workloop);
 
 let el = create_element('h1', {id: 'foo'},
     create_element('h2', {id: "bar"}, 45),
