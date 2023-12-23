@@ -24,22 +24,88 @@ function create_text_element(text) {
 }
 
 function render(el, container) {
-    const dom = el.type === "TEXT_ELEMENT" ?
-        document.createTextNode(el.props.nodeValue) :
-            document.createElement(el.type);
+    next_unit_of_work = {
+        dom: container,
+        props: {
+            children: [el]
+        }
+    }
+}
 
-    Object.keys(el.props).forEach(name => {
+function perform_unit_of_work(fiber) {
+    if (!fiber.dom) {
+        fiber.dom = create_dom(fiber);
+    }
+
+    if (fiber.parent) {
+        fiber.parent.dom.appendChild(fiber.dom);
+    }
+
+    const els = fiber.props.children;
+    let index = 0;
+    let prev_sibling = null;
+    while(index < els.length) {
+        const el = els[index];
+        const new_fiber = {
+            type: el.type,
+            props: el.props,
+            parent: fiber,
+            dom: null
+        }
+
+        if (index === 0) {
+            fiber.child = new_fiber;
+        } else {
+            prev_sibling.sibling = new_fiber;
+        }
+
+        prev_sibling = new_fiber;
+
+        index++;
+    }
+    
+    console.log("fiber", fiber);
+    if (fiber.child) {
+        return fiber.child;
+    }
+
+    let next_fiber = fiber;
+
+    while(next_fiber) {
+        if (next_fiber.sibling) {
+            return next_fiber.sibling;
+        }
+        next_fiber = next_fiber.parent;
+    }
+
+    return null;
+}
+
+let next_unit_of_work = null;
+function workloop(deadline) {
+    let should_yield = false;
+    while (next_unit_of_work && !should_yield) {
+        next_unit_of_work = perform_unit_of_work(next_unit_of_work);
+        should_yield = deadline.timeRemaining() < 1;
+    }
+    requestIdleCallback(workloop);
+}
+
+function create_dom(fiber) {
+    const dom = fiber.type === "TEXT_ELEMENT" ?
+        document.createTextNode(fiber.props.nodeValue) :
+            document.createElement(fiber.type);
+
+    Object.keys(fiber.props).forEach(name => {
         if (name !== 'children') {
-            dom[name] = el.props[name];
+            dom[name] = fiber.props[name];
         }
     });
 
-    container.appendChild(dom);
-
-    el.props.children.forEach(child => {
-        render(child, dom);
-    });
+    return dom;
 }
+
+requestIdleCallback(workloop);
 
 let el = create_element('h1', {id: 'foo'},
     create_element('h2', {id: "bar"}, 45),
