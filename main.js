@@ -1,5 +1,10 @@
 let root = document.getElementById("root");
 
+let next_unit_of_work = null;
+let wipRoot = null;
+let current_root = null;
+let deletions = [];
+
 function create_element(type, props, ...children) {
     console.log(children);
     return {
@@ -24,8 +29,29 @@ function create_text_element(text) {
 }
 
 function commit_root() {
+    deletions.forEach(commit_work);
     commit_work(wipRoot.child);
+    current_root = wipRoot;
     wipRoot = null;
+}
+
+const is_property = k => k !== 'children';
+function update_dom(dom, prev_props, next_props) {
+    Object.keys(prev_props)
+    .filter(is_property)
+    .forEach(name => {
+        if (!(name in next_props)) {
+            dom[name] = ''
+        }
+    });
+
+    Object.keys(prev_props)
+    .filter(is_property)
+    .forEach(name => {
+        if (prev_props[name] !== next_props[name]) {
+            dom[name] = next_props[name];
+        }
+    });
 }
 
 function commit_work(fiber) {
@@ -34,19 +60,85 @@ function commit_work(fiber) {
     }
 
     const dom_parent = fiber.parent.dom;
-    dom_parent.appendChild(fiber.dom);
+
+    if (fiber.effect_tag === 'PLACEMENT' && fiber.dom !== null) {
+        dom_parent.appendChild(fiber.dom);
+    }
+    else if (fiber.effect_tag === 'DELETION') {
+        dom_parent.removeChild(fiber.dom);
+        return
+    }
+    else if (fiber.effect_tag === 'UPDATE' && fiber.dom !== null) {
+        update_dom(fiber.dom, fiber.alternate.props, fiber.props);
+    }
     commit_work(fiber.child);
     commit_work(fiber.sibling);
 }
 
 function render(el, container) {
+    deletions = [];
     wipRoot = {
         dom: container,
         props: {
             children: [el]
-        }
+        },
+        alternate: current_root,
     }
     next_unit_of_work = wipRoot;
+}
+
+function reconcile_children(wipfiber, els) {
+    let index = 0;
+    let old_fiber = wipfiber.alternate && wipfiber.alternate.child;
+    let prev_sibling = null;
+    while(index < els.length || old_fiber != null) {
+        const el = els[index];
+        const same_type = old_fiber && el && el.type === old_fiber.type;
+        let new_fiber = null;
+        if (same_type) {
+            // TODO(): Modification
+            new_fiber = {
+                type: el.type,
+                props: el.props,
+                parent: wipfiber,
+                dom: old_fiber.dom,
+                alternate: old_fiber,
+                effect_tag: 'UPDATE'
+            };
+        }
+
+        if (el && !same_type) {
+            // TODO(): Add element
+            new_fiber = {
+                type: el.type,
+                props: el.props,
+                parent: wipfiber,
+                dom: null,
+                alternate: null,
+                effect_tag: 'PLACEMENT'
+            };
+        }
+
+        if (old_fiber && !same_type) {
+            // TODO(): Deletion
+            old_fiber.effect_tag = 'DELETION';
+            deletions.push(old_fiber);
+        }
+
+        if (old_fiber) {
+            old_fiber = old_fiber.sibling;
+        }
+
+        if (index === 0) {
+            wipfiber.child = new_fiber;
+        } else if (el) {
+            prev_sibling.sibling = new_fiber;
+        }
+
+        prev_sibling = new_fiber;
+
+        index++;
+    }
 }
 
 function perform_unit_of_work(fiber) {
@@ -55,27 +147,7 @@ function perform_unit_of_work(fiber) {
     }
 
     const els = fiber.props.children;
-    let index = 0;
-    let prev_sibling = null;
-    while(index < els.length) {
-        const el = els[index];
-        const new_fiber = {
-            type: el.type,
-            props: el.props,
-            parent: fiber,
-            dom: null
-        }
-
-        if (index === 0) {
-            fiber.child = new_fiber;
-        } else {
-            prev_sibling.sibling = new_fiber;
-        }
-
-        prev_sibling = new_fiber;
-
-        index++;
-    }
+    reconcile_children(fiber, els);
     
     console.log("fiber", fiber);
     if (fiber.child) {
@@ -93,9 +165,6 @@ function perform_unit_of_work(fiber) {
 
     return null;
 }
-
-let next_unit_of_work = null;
-let wipRoot = null;
 
 function workloop(deadline) {
     let should_yield = false;
@@ -127,71 +196,83 @@ function create_dom(fiber) {
 }
 
 
-let el = create_element('h1', {id: 'foo'},
+function change_num() {
+    render(el2, root);
+}
+
+let el = create_element('div', {id: 'foo', onclick: change_num},
     create_element('h2', {id: "bar"}, 45),
-    create_element('h3', {id: "baz"})
+    create_element('h3', {id: "baz"}, 78)
 );
+
+let el2 = create_element('div', {id: 'foo'},
+    create_element('h2', {id: "bar"}, 785),
+    create_element('h3', {id: "baz"}, 78)
+);
+
+
+
 
 render(el, root);
 
-function button(id, str, color) {
-    let result = false;
-    if (click_target.classList.contains(id)) {
-        result = true;
-    }
-    let button = document.createElement("button");
-    button.style.backgroundColor = color;
-    button.innerText = str;
-    button.classList.add(id);
-    new_dom.child.push(button);
+// function button(id, str, color) {
+//     let result = false;
+//     if (click_target.classList.contains(id)) {
+//         result = true;
+//     }
+//     let button = document.createElement("button");
+//     button.style.backgroundColor = color;
+//     button.innerText = str;
+//     button.classList.add(id);
+//     new_dom.child.push(button);
 
-    return result;
-}
+//     return result;
+// }
 
-let new_dom = document.createElement("main");
-new_dom.setAttribute("id", "main");
-root.appendChild(new_dom);
-let old_dom = new_dom;
+// let new_dom = document.createElement("main");
+// new_dom.setAttribute("id", "main");
+// root.appendChild(new_dom);
+// let old_dom = new_dom;
 
-let button_visible = true;
+// let button_visible = true;
 
-let e_queue = [];
-addEventListener("click", function(e) {
-    e_queue.push(e);
-    immediate_path();
-});
+// let e_queue = [];
+// addEventListener("click", function(e) {
+//     e_queue.push(e);
+//     immediate_path();
+// });
 
 
 
-let click_target = root;
+// let click_target = root;
 
-let color = "#555";
-function immediate_path() {
-    while (e_queue.length > 0) {
-        let ev = e_queue.pop();
-        switch (ev.type) {
-            case 'click': {
-                console.log("Ive been clicked");
-                click_target = ev.target;
+// let color = "#555";
+// function immediate_path() {
+//     while (e_queue.length > 0) {
+//         let ev = e_queue.pop();
+//         switch (ev.type) {
+//             case 'click': {
+//                 console.log("Ive been clicked");
+//                 click_target = ev.target;
                 
-            } break;
-            default: {
-                console.log("rien de particulier");
-            }
-        }
-    }
+//             } break;
+//             default: {
+//                 console.log("rien de particulier");
+//             }
+//         }
+//     }
 
-    old_dom = new_dom;
-    new_dom = document.createElement("main");
-    new_dom.setAttribute("id", "main");
+//     old_dom = new_dom;
+//     new_dom = document.createElement("main");
+//     new_dom.setAttribute("id", "main");
 
     
-    if (button_visible) {
-        if (button(1, "Hello world", color)) {
-            color = "#74A"
-        }
-    }
+//     if (button_visible) {
+//         if (button(1, "Hello world", color)) {
+//             color = "#74A"
+//         }
+//     }
 
-    root.removeChild(document.getElementById("main"));
-    root.appendChild(new_dom);
-}
+//     root.removeChild(document.getElementById("main"));
+//     root.appendChild(new_dom);
+// }
